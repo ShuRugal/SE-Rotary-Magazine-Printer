@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.10.35027.167
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Rotary-Magazine.PbScript1", "Rotary-Magazine.PbScript1.csproj", "{1B986C5E-CA58-4C89-BA7B-5EC2A7ED4A23}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{1B986C5E-CA58-4C89-BA7B-5EC2A7ED4A23}.Debug|x64.ActiveCfg = Debug|x64
+		{1B986C5E-CA58-4C89-BA7B-5EC2A7ED4A23}.Debug|x64.Build.0 = Debug|x64
+		{1B986C5E-CA58-4C89-BA7B-5EC2A7ED4A23}.Release|x64.ActiveCfg = Release|x64
+		{1B986C5E-CA58-4C89-BA7B-5EC2A7ED4A23}.Release|x64.Build.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {87FAD83A-CE8B-45C1-9F4B-AD8A7DC8BFAB}
+	EndGlobalSection
+EndGlobal
