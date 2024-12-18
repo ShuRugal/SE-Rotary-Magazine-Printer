@@ -8,7 +8,9 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.Remoting.Lifetime;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Windows.Input;
 using VRage;
 using VRage.Collections;
@@ -42,20 +44,29 @@ namespace IngameScript
 		//set to accept command inputs
 		MyCommandLine _commandLine = new MyCommandLine();
 		Dictionary<string, Action> _commands = new Dictionary<string, Action>(StringComparer.OrdinalIgnoreCase);
-		//class to define our magazine objects, I hope the attribute names are self explanatory...
+
+		public class slot	//class to track the status of a missile slot
+		{
+			public string state = "empty";
+			public IMyShipMergeBlock mergeBlock;
+			public IMyShipConnector connector;
+		}		
 		public class magazine //class to define and interact with a magazine and its components
 		{
 			public IMyMotorStator rotor;
-			public IMyTerminalBlock projector;
+			public IMyProjector projector;
 			public IMyGyro gyro;
-			public List<IMyShipMergeBlock> mergeBlocks = new List<IMyShipMergeBlock>();
-			public List<IMyTerminalBlock> connectors = new List<IMyTerminalBlock>();
-			public List<IMyTerminalBlock> welders = new List<IMyTerminalBlock>();
+			//public List<IMyShipMergeBlock> mergeBlocks = new List<IMyShipMergeBlock>(); - deprecacted
+			//public List<IMyShipConnector> connectors = new List<IMyShipConnector>(); - deprecated
+			public Dictionary<int, slot> slots = new Dictionary<int, slot>();
+			public List<IMyShipWelder> welders = new List<IMyShipWelder>();
 			public List<IMyTerminalBlock> doors = new List<IMyTerminalBlock>();
+			public string state = "ready";
+			public string laststate = "init";
 			public string status = "idle";
 			public double position;
 			public double comandedPosition = 1;
-			public int slots;
+			//public int slots; - deprecated
 			public int stepAngle;
 			public string name;
 		}
@@ -95,19 +106,39 @@ namespace IngameScript
 						else if (type == "MyShipMergeBlock")
 						{
 							//Echo($"found {block.CustomName}");
-							magazines[magname].mergeBlocks.Add(block as IMyShipMergeBlock);
+							var resultString = block.CustomName.Split('[', ']')[1];
+							var slotnum = Int32.Parse(resultString);
+							if (magazines[magname].slots.ContainsKey(slotnum) )
+							{
+								magazines[magname].slots[slotnum].mergeBlock = block as IMyShipMergeBlock;
+							}
+							else
+							{
+								magazines[magname].slots[slotnum] = new slot();
+								magazines[magname].slots[slotnum].mergeBlock = block as IMyShipMergeBlock;
+							}
 
 						}
 						else if (type == "MyShipConnector")
 						{
 							//Echo($"found {block.CustomName}");
-							magazines[magname].connectors.Add(block);
+							var resultString = block.CustomName.Split('[', ']')[1];
+							var slotnum = Int32.Parse(resultString);
+							if (magazines[magname].slots.ContainsKey(slotnum))
+							{
+								magazines[magname].slots[slotnum].connector = block as IMyShipConnector;
+							}
+							else
+							{
+								magazines[magname].slots[slotnum] = new slot(); 
+								magazines[magname].slots[slotnum].connector = block as IMyShipConnector;
+							}
 
 						}
 						else if (type == "MyShipWelder")
 						{
 							//Echo($"found {block.CustomName}");
-							magazines[magname].welders.Add(block);
+							magazines[magname].welders.Add(block as IMyShipWelder);
 
 						}
 						else if (type == "MyAirtightSlideDoor")
@@ -119,7 +150,7 @@ namespace IngameScript
 						else if (type == "MySpaceProjector")
 						{
 							//Echo($"found {block.CustomName}");
-							magazines[magname].projector = block;
+							magazines[magname].projector = block as IMyProjector;
 
 						}
 						else if (type == "MyGyro")
@@ -140,8 +171,6 @@ namespace IngameScript
 				if (
 					(val.doors.Count == 0) |
 					(val.welders.Count == 0) |
-					(val.mergeBlocks.Count == 0) |
-					(val.connectors.Count == 0) |
 					(val.rotor == null) |
 					(val.projector == null) |
 					(val.gyro == null)
@@ -152,8 +181,6 @@ namespace IngameScript
 				else Echo($"\"{key}\" is complete.");
 				Echo($"found {val.doors.Count} doors.");
 				Echo($"found {val.welders.Count} welders.");
-				Echo($"found {val.mergeBlocks.Count} merge blocks.");
-				Echo($"found {val.connectors.Count} connectors.");
 				Echo($"found rotor \"{val.rotor.CustomName}\"");
 				Echo($"found projector \"{val.projector.CustomName}\"");
 				Echo($"found gyro \"{val.gyro.CustomName}\"");
@@ -167,9 +194,8 @@ namespace IngameScript
 			{
 				magazine mag = entry.Value;
 				string name = entry.Key;
-				magazines[name].slots = magazines[name].mergeBlocks.Count;
-				magazines[name].stepAngle = 360 / magazines[name].slots;
-				magazines[name].position = (mag.rotor.Angle / 2 * Math.PI * magazines[name].slots +1);
+				magazines[name].stepAngle = 360 / magazines[name].slots.Count;
+				magazines[name].position = (mag.rotor.Angle / 2 * Math.PI * magazines[name].slots.Count +1);
 				mag.status = "Bootup Sequence";
 				Single ll = -361;
 				Single ul = 361;
@@ -191,29 +217,52 @@ namespace IngameScript
 				: ((IMyTextSurfaceProvider)block).GetSurface(0);
 			surface.ContentType = ContentType.TEXT_AND_IMAGE;
 			surface.WriteText("");
-			foreach (var entry in magazines) { 
-				string name = entry.Key;
-				var mag = entry.Value;
+			foreach (var mag in magazines.Values) { 
+				string name = mag.name;
 				report += $"Magazine {name}\n";
-				report += $"State: {mag.status}\n";
-				report += $"Position: {mag.position}\n";
-				foreach (var merge in magazines[name].mergeBlocks)
+				report += $"State: {mag.state}\n";
+				report += $"Status: {mag.status}\n";
+				report += $"Commanded Position: {mag.comandedPosition}\n";
+				report += $"Actual Position: {mag.position}\n";
+				foreach (var slot in mag.slots.Values)
 				{
-					report += $"{merge.CustomName} Connected: {merge.IsConnected}\n";
+					report += $"{slot.mergeBlock.CustomName} Connected: {slot.mergeBlock.IsConnected}\n";
+				}/*
+				report += "Printable Parts\n";
+					foreach (var entry in mag.readypartslist)
+				{
+					report += $"{entry.ToString()}\n";
 				}
+				report += "target Parts\n";
+				foreach (var entry in mag.targetparts)
+				{
+					report += $"{entry.ToString()}\n";
+				}*/
 				report += "\n";
 			}
 			surface.WriteText(report);
 			Echo(report);
 		}
 
+		public void weldersEnable (magazine mag, bool onoff)
+		{
+			foreach (var welder in mag.welders)
+			{
+				welder.Enabled = onoff;
+			}
+		}
+
 		public void monitor() //monitor the status of the magazine to see if it matches the commanded status and to evalute if actions need to be performed
 		{ 
 		foreach (var mag in magazines.Values)
 			{
-				magazines[mag.name].position = (mag.rotor.Angle / (2 * Math.PI) * magazines[mag.name].slots + 1);
+				magazines[mag.name].position = (mag.rotor.Angle / (2 * Math.PI) * magazines[mag.name].slots.Count + 1);
 				mag.position = Math.Round(magazines[mag.name].position, 2);
 				mag.comandedPosition = Math.Round(magazines[mag.name].comandedPosition, 2);
+				if (mag.state == "empty" | mag.state == "printing")
+				{
+					printMissilesFull(mag);
+				}
 				if (mag.comandedPosition != mag.position)
 				{
 					rotateMag(mag.name, mag.comandedPosition);
@@ -226,8 +275,56 @@ namespace IngameScript
 					magazines[mag.name].status = $"Idle in position {mag.position}";
 					mag.gyro.GyroOverride = false;
 				}
+				if (mag.state == "ready")
+				{
+					bool empty = false;
+					foreach (var slot in mag.slots.Values)
+					{
+						if (slot.mergeBlock.IsConnected) empty = false;
+						else if (slot.connector.IsConnected) empty = false;
+					}
+					if (empty == true) magazines[mag.name].state = "empty";
+				}
 
 			}
+		}
+
+		public void printMissilesFull(magazine mag) //function for controlling the printing of new missiles
+		{
+			if (mag.state == "empty")
+			{
+				magazines[mag.name].state = "printing"; //update state
+				foreach (var slot in mag.slots.Values) //turn off all merge blocks
+				{
+					slot.mergeBlock.Enabled = false;
+				}
+				magazines[mag.name].comandedPosition = 1; //send the mag to position 1 to begin the print cycle
+				mag.slots[(int)mag.comandedPosition].mergeBlock.Enabled = true; //turn on the merge block for this slot
+			}
+			else if (mag.state == "printing" && mag.position == mag.comandedPosition)
+			{
+
+				bool slotfinished = (mag.projector.BuildableBlocksCount == 0);
+				magazines[mag.name].status = $"printing slot{mag.comandedPosition}";
+				
+				if (slotfinished == false)
+				{
+					weldersEnable(mag, true); //turn the welders on
+					mag.slots[(int)mag.comandedPosition].state = "Printing";
+				}
+				else if (slotfinished == true)
+				{
+					magazines[mag.name].comandedPosition += 1;
+					mag.slots[(int)mag.comandedPosition].mergeBlock.Enabled = true; //turn on the merge block for this slot
+					mag.slots[(int)mag.comandedPosition].state = "Ready";
+				}
+				if (mag.projector.RemainingBlocks == 0)
+				{
+					weldersEnable(mag, false);//turn the welders off
+					magazines[mag.name].state = "ready";
+				}
+			}
+		
 		}
 
 		public void parsecommands(string argument) //handle user input in the run field of the progblock
@@ -262,13 +359,11 @@ namespace IngameScript
 		{
 			foreach (var mag in magazines.Values) {
 				magazines[mag.name].comandedPosition += 1;
-				if (magazines[mag.name].comandedPosition > (mag.slots))
-				{
-					magazines[mag.name].comandedPosition = magazines[mag.name].comandedPosition - magazines[mag.name].slots;
-				}
 			}
 		
 		}
+
+		
 
 		public void rotateMag(string magname, double newpos) //monitor function will call this if it discovers a misalignment of greater than 1% of 1 step.  this function can also be used directly to command a new mag position
 		{
@@ -276,8 +371,9 @@ namespace IngameScript
 			mag.gyro.GyroOverride = true; //set our gyro to hold current heading to counter torque of rotating the magazine
 			magazines[magname].comandedPosition = newpos; //if we called this manually, we need to store the new commanded position so the monitor function does not move the mag back
 			float gotoangle = (float)(mag.stepAngle * (mag.comandedPosition - 1));
-			if (mag.position == mag.slots && mag.comandedPosition == 1) //check if we are at the last position.  if so, move FORWARD not BACKWARD
+			if ( mag.comandedPosition > mag.slots.Count) //check if we are commanding an invalid position.  if so, go to 1
 			{
+				magazines[mag.name].comandedPosition = 1;
 				magazines[mag.name].status = $"Moving to position {mag.comandedPosition}";
 				mag.rotor.TargetVelocityRPM = 15;
 				mag.rotor.UpperLimitDeg = gotoangle;
@@ -306,6 +402,16 @@ namespace IngameScript
 
 		}
 
+		public Dictionary<string, int> readprojector(IMyProjector projector) //get the status of the projector
+		{
+			Dictionary<string, int> partlist = new Dictionary<string, int>();
+			foreach (var entry in projector.RemainingBlocksPerType)
+				{
+					partlist.Add(entry.Key.ToString(), entry.Value);
+				}
+			return partlist;
+		}
+		
 		//Startup sequence
 		public Program()
 		{
@@ -313,6 +419,10 @@ namespace IngameScript
 			findMags(magazines);
 			bootMags();
 			_commands["step"] = step;
+			foreach (var mag in magazines.Values)
+			{
+				weldersEnable(mag, false);
+			}
 		}
 
 
@@ -331,7 +441,7 @@ namespace IngameScript
 		public void Main(string argument, UpdateType updateSource)
 		{
 			// Configure this program to run the Main method every 10 update ticks
-			//Runtime.UpdateFrequency = UpdateFrequency.Update10;
+			Runtime.UpdateFrequency = UpdateFrequency.Update10;
 			monitor();
 			sitrep();
 			parsecommands(argument);
